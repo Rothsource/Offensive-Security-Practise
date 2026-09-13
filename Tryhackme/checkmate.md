@@ -3,7 +3,7 @@
 - **Room theme:** Password security assessment / credential attacks
 - **Target:** `10.49.175.15`
 - **Category:** Password Cracking / OSINT / Web
-- **Difficulty:** Medium
+- **Difficulty:** Easy
 
 ## TL;DR
 
